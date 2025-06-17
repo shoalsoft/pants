@@ -15,7 +15,9 @@ from enum import Enum
 
 import github
 from pants_release.common import die
-from pants_release.git import git, github_repo
+from pants_release.git import MAIN_REPO_SLUG, git, github_repo
+
+from pants.util.strutil import softwrap
 
 logger = logging.getLogger(__name__)
 
@@ -136,10 +138,21 @@ def main() -> None:
         # required=True,
         help="The git ref (tag) of the release",
     )
+    parser.add_argument(
+        "--github-repo-slug",
+        default=MAIN_REPO_SLUG,
+        action="store",
+        help=softwrap(
+            """
+            GitHub repository slug for the Pants repository. This option exists to allow forked, non-official
+            repositories to make use of the release automation scripts in the fork.
+            """
+        ),
+    )
 
     args = parser.parse_args()
 
-    repo = github_repo()
+    repo = github_repo(args.github_repo_slug)
     # NB: This assumes the tag (and relevant history) is already pulled
     entries = [prepare_sha(sha, repo) for sha in relevant_shas(args.release_ref)]
     notes = (

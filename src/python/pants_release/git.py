@@ -56,7 +56,7 @@ def git_fetch(rev: str) -> str:
     return git_rev_parse("FETCH_HEAD")
 
 
-def github_repo() -> github.Repository.Repository:
+def github_repo(repo_slug: str) -> github.Repository.Repository:
     # Borrow the token from `gh`, because it works well both interactively (running `gh auth login`
     # is far more convenient for interactive use than manually generating a token) and in
     # scripts/automation (it reads the `GH_TOKEN=...` env var, if set)
@@ -73,7 +73,7 @@ def github_repo() -> github.Repository.Repository:
 
     try:
         gh = github.Github(auth=github.Auth.Token(token))
-        repo = gh.get_repo(MAIN_REPO_SLUG)
+        repo = gh.get_repo(repo_slug)
     except Exception as e:
         die(f"Failed to get Github info; is your token valid? {e}")
 

@@ -26,7 +26,7 @@ from typing import Any, cast
 import requests
 from packaging.version import Version
 from pants_release.common import VERSION_PATH, banner, die, green
-from pants_release.git import git, git_rev_parse
+from pants_release.git import MAIN_REPO_SLUG, git, git_rev_parse
 
 from pants.util.contextutil import temporary_dir
 from pants.util.memo import memoized_property
@@ -680,7 +680,7 @@ def build_fs_util() -> None:
 # -----------------------------------------------------------------------------------------------
 
 
-def tag_release() -> None:
+def tag_release(repo_slug: str) -> None:
     banner("Tagging release")
 
     check_head_commit()
@@ -689,7 +689,7 @@ def tag_release() -> None:
 
     prompt_artifact_freshness()
 
-    run_tag_release()
+    run_tag_release(repo_slug)
     banner("Successfully tagged release")
 
 
@@ -716,7 +716,7 @@ def check_clean_git_branch() -> None:
                 """
             )
         )
-    valid_branch_pattern = r"^(main)|([0-9]+\.[0-9]+\.x)$"
+    valid_branch_pattern = r"^(main)|([0-9]+\.[0-9]+\.x)(\+[a-zA-Z0-9]+)?$"
     git_branch = get_git_branch()
     if not re.match(valid_branch_pattern, git_branch):
         die(
@@ -748,7 +748,7 @@ def check_pgp() -> None:
         )
 
 
-def run_tag_release() -> None:
+def run_tag_release(repo_slug: str) -> None:
     tag_name = f"release_{CONSTANTS.pants_stable_version}"
     # If you need to re-tag a release that's already been tagged once and definitely know what
     # you're doing, feel free to do an ad-hoc addition of --force flags here.
@@ -760,7 +760,7 @@ def run_tag_release() -> None:
         tag_name,
         capture_stdout=False,
     )
-    git("push", "git@github.com:pantsbuild/pants.git", tag_name, capture_stdout=False)
+    git("push", f"git@github.com:{repo_slug}.git", tag_name, capture_stdout=False)
 
 
 def upload_wheels_via_twine() -> None:
@@ -872,6 +872,18 @@ def smoke_test_install_and_version(version: str) -> None:
 
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--github-repo-slug",
+        default=MAIN_REPO_SLUG,
+        action="store",
+        help=softwrap(
+            """
+            GitHub repository slug for the Pants repository. This option exists to allow forked, non-official
+            repositories to make use of the release automation scripts in the fork.
+            """
+        ),
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("tag-release")
 
@@ -890,7 +902,7 @@ def create_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = create_parser().parse_args()
     if args.command == "tag-release":
-        tag_release()
+        tag_release(args.github_repo_slug)
     if args.command == "test-release":
         test_release()
     if args.command == "build-wheels":

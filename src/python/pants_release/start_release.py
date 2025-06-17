@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import github
 from packaging.version import Version
 from pants_release.common import CONTRIBUTORS_PATH, VERSION_PATH, die, sorted_contributors
-from pants_release.git import git, git_fetch, github_repo
+from pants_release.git import MAIN_REPO_SLUG, git, git_fetch, github_repo
 
 from pants.util.strutil import softwrap
 
@@ -42,6 +42,17 @@ def create_parser() -> argparse.ArgumentParser:
             """
             Publish the changes: create a branch, commit, push, and create a pull request. Ensure
             `gh` (https://cli.github.com) is installed and authenticated.
+            """
+        ),
+    )
+    parser.add_argument(
+        "--github-repos-slug",
+        action="store",
+        default=MAIN_REPO_SLUG,
+        help=softwrap(
+            """
+            GitHub repository slug for the Pants repository. This option exists to allow forked, non-official
+            repositories to make use of the release automation scripts in the fork.
             """
         ),
     )
@@ -90,7 +101,7 @@ def commit_and_pr(
     git("checkout", "-b", branch)
     git("add", str(VERSION_PATH), str(CONTRIBUTORS_PATH))
     git("commit", "-m", title)
-    git("push", "git@github.com:pantsbuild/pants.git", "HEAD")
+    git("push", f"git@github.com:{repo.name}.git", "HEAD")
 
     pr = repo.create_pull(
         title=title,
@@ -119,7 +130,9 @@ def main() -> None:
         )
 
     # connect to github first, to fail faster if credentials are wrong, etc.
-    gh_repo = github_repo() if args.publish else None
+    if args.github_repo_slug != MAIN_REPO_SLUG:
+        logger.info(f"Operating on alternate Pants repository: {args.github_repository}")
+    gh_repo = github_repo(args.github_repo_slug) if args.publish else None
 
     release_info = ReleaseInfo.determine(args.new)
 

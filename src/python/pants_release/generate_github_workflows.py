@@ -842,6 +842,7 @@ def build_wheels_job(
     platform: Platform,
     for_deploy_ref: str | None,
     needs: list[str] | None,
+    is_owner_condition: str = IS_PANTS_OWNER,
 ) -> Jobs:
     helper = Helper(platform)
     # For manylinux compatibility, we build Linux wheels in a container rather than directly
@@ -886,7 +887,7 @@ def build_wheels_job(
         ]
 
     if_condition = (
-        IS_PANTS_OWNER if for_deploy_ref else f"({IS_PANTS_OWNER}) && ({DONT_SKIP_WHEELS})"
+        is_owner_condition if for_deploy_ref else f"({is_owner_condition}) && ({DONT_SKIP_WHEELS})"
     )
     return {
         helper.job_name("build_wheels"): {
@@ -1027,14 +1028,39 @@ def build_wheels_job(
     }
 
 
-def build_wheels_jobs(*, for_deploy_ref: str | None = None, needs: list[str] | None = None) -> Jobs:
+def build_wheels_jobs(
+    *,
+    for_deploy_ref: str | None = None,
+    needs: list[str] | None = None,
+    is_owner_condition: str = IS_PANTS_OWNER,
+) -> Jobs:
     # N.B.: When altering the number of total wheels built, please edit the expected
     # total in the release.py script. Currently here:
     return {
-        **build_wheels_job(Platform.LINUX_X86_64, for_deploy_ref, needs),
-        **build_wheels_job(Platform.LINUX_ARM64, for_deploy_ref, needs),
-        **build_wheels_job(Platform.MACOS13_X86_64, for_deploy_ref, needs),
-        **build_wheels_job(Platform.MACOS14_ARM64, for_deploy_ref, needs),
+        **build_wheels_job(
+            Platform.LINUX_X86_64,
+            for_deploy_ref=for_deploy_ref,
+            needs=needs,
+            is_owner_condition=is_owner_condition,
+        ),
+        **build_wheels_job(
+            Platform.LINUX_ARM64,
+            for_deploy_ref=for_deploy_ref,
+            needs=needs,
+            is_owner_condition=is_owner_condition,
+        ),
+        **build_wheels_job(
+            Platform.MACOS13_X86_64,
+            for_deploy_ref=for_deploy_ref,
+            needs=needs,
+            is_owner_condition=is_owner_condition,
+        ),
+        **build_wheels_job(
+            Platform.MACOS14_ARM64,
+            for_deploy_ref=for_deploy_ref,
+            needs=needs,
+            is_owner_condition=is_owner_condition,
+        ),
     }
 
 
@@ -1176,16 +1202,22 @@ def cache_comparison_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
 def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
     inputs, env = workflow_dispatch_inputs([WorkflowInput("REF", "string")])
 
+    is_pants_owner_or_authorized_fork = (
+        f"({IS_PANTS_OWNER} || vars.CI_ALLOW_RELEASES_IN_FORK != '')"
+    )
+
     helper = Helper(Platform.LINUX_X86_64)
     wheels_jobs = build_wheels_jobs(
-        needs=["release_info"], for_deploy_ref=gha_expr("needs.release_info.outputs.build-ref")
+        needs=["release_info"],
+        for_deploy_ref=gha_expr("needs.release_info.outputs.build-ref"),
+        is_owner_condition=is_pants_owner_or_authorized_fork,
     )
     wheels_job_names = tuple(wheels_jobs.keys())
     jobs = {
         "release_info": {
             "name": "Create draft release and output info",
             "runs-on": "ubuntu-22.04",
-            "if": IS_PANTS_OWNER,
+            "if": is_pants_owner_or_authorized_fork,
             "steps": [
                 {
                     "name": "Determine ref to build",
@@ -1208,7 +1240,7 @@ def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
                 {
                     "name": "Make GitHub Release",
                     "id": "make_draft_release",
-                    "if": f"{IS_PANTS_OWNER} && steps.get_info.outputs.is-release == 'true'",
+                    "if": f"{is_pants_owner_or_authorized_fork} && steps.get_info.outputs.is-release == 'true'",
                     "env": {
                         "GH_TOKEN": "${{ github.token }}",
                         "GH_REPO": "${{ github.repository }}",
@@ -1256,7 +1288,7 @@ def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
         "publish": {
             "runs-on": "ubuntu-22.04",
             "needs": [*wheels_job_names, "release_info"],
-            "if": f"{IS_PANTS_OWNER} && needs.release_info.outputs.is-release == 'true'",
+            "if": f"{is_pants_owner_or_authorized_fork} && needs.release_info.outputs.is-release == 'true'",
             "env": {
                 # This job does not actually build anything: only download wheels from S3.
                 "MODE": "debug",
@@ -1287,6 +1319,7 @@ def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
                 {
                     "name": "Announce to Slack",
                     "uses": action("slack-github-action"),
+                    "if": IS_PANTS_OWNER,
                     "with": {
                         "channel-id": "C18RRR4JK",
                         "payload-file-path": "${{ runner.temp }}/slack_announcement.json",
@@ -1296,6 +1329,7 @@ def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
                 {
                     "name": "Announce to pants-devel",
                     "uses": action("action-send-mail"),
+                    "if": IS_PANTS_OWNER,
                     "with": {
                         # Note: Email is sent from the dedicated account pants.announce@gmail.com.
                         # The EMAIL_CONNECTION_URL should be of the form:
@@ -1317,7 +1351,7 @@ def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
                     "name": "Get release notes",
                     "run": dedent(
                         """\
-                        ./pants run src/python/pants_release/changelog.py -- "${{ needs.release_info.outputs.build-ref }}" > notes.txt
+                        ./pants run src/python/pants_release/changelog.py -- --github-repo-slug="$GH_REPO" "${{ needs.release_info.outputs.build-ref }}" > notes.txt
                         """
                     ),
                     "env": {
@@ -1339,6 +1373,7 @@ def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
                 },
                 {
                     "name": "Trigger cheeseshop build",
+                    "if": f"{IS_PANTS_OWNER} && needs.release_info.outputs.is-release == 'true'",
                     "env": {
                         "GH_TOKEN": "${{ secrets.WORKER_PANTS_CHEESESHOP_TRIGGER_PAT }}",
                     },
@@ -1350,7 +1385,7 @@ def release_jobs_and_inputs() -> tuple[Jobs, dict[str, Any]]:
                 },
                 {
                     "name": "Trigger docs sync",
-                    "if": "needs.release_info.outputs.is-release == 'true'",
+                    "if": f"{IS_PANTS_OWNER} && needs.release_info.outputs.is-release == 'true'",
                     "env": {
                         "GH_TOKEN": "${{ secrets.WORKER_PANTS_PANTSBUILD_ORG_TRIGGER_PAT }}",
                     },

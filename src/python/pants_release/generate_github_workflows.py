@@ -66,8 +66,13 @@ class Platform(Enum):
     MACOS14_ARM64 = "macOS14-ARM64"
 
 
-GITHUB_HOSTED = {Platform.LINUX_X86_64, Platform.MACOS13_X86_64, Platform.MACOS14_ARM64}
-SELF_HOSTED = {Platform.LINUX_ARM64}
+GITHUB_HOSTED = {
+    Platform.LINUX_X86_64,
+    Platform.MACOS13_X86_64,
+    Platform.MACOS14_ARM64,
+    Platform.LINUX_ARM64,
+}
+SELF_HOSTED: frozenset[Platform] = frozenset()
 CARGO_AUDIT_IGNORED_ADVISORY_IDS = (
     "RUSTSEC-2020-0128",  # returns a false positive on the cache crate, which is a local crate not a 3rd party crate
 )
@@ -440,12 +445,7 @@ class Helper:
         elif self.platform == Platform.LINUX_X86_64:
             ret += ["ubuntu-22.04"]
         elif self.platform == Platform.LINUX_ARM64:
-            ret += [
-                "runs-on",
-                "runner=4cpu-linux-arm64",
-                "image=ubuntu22-full-arm64-python3.7-3.13",
-                "run-id=${{ github.run_id }}",
-            ]
+            ret += ["ubuntu-24.04-arm"]
         else:
             raise ValueError(f"Unsupported platform: {self.platform_name()}")
         return ret
